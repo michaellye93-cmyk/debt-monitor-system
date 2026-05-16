@@ -351,6 +351,15 @@ export default function App() {
         supabase.from('user_access').select('is_admin').eq('auth_user_id', user.id).maybeSingle()
       ]);
 
+      if (debtorsRes.error) {
+        console.error('Debtors Error:', debtorsRes.error);
+        if (debtorsRes.error.message.includes('column "category" does not exist')) {
+            window.alert('Database update required: Please run the SQL migration to add the "category" column.');
+        } else {
+            window.alert(`Database Error (Debtors): ${debtorsRes.error.message}`);
+        }
+      }
+
       if (profileRes.data) setIsAdmin(profileRes.data.is_admin);
       if (staffRes.data) setStaffList(staffRes.data);
       if (debtorsRes.data) {
@@ -953,7 +962,12 @@ export default function App() {
   const renderProfiles = () => {
     if (selectedProfileId) {
       const debtor = debtors.find(d => d.id === selectedProfileId);
-      if (!debtor) return null;
+      if (!debtor) return (
+        <div style={{ padding: '40px', textAlign: 'center' }}>
+            <h3 style={{ marginBottom: '16px' }}>Debtor Profile Not Found</h3>
+            <button className="btn btn-primary" onClick={() => setSelectedProfileId(null)}>Back to Directory</button>
+        </div>
+      );
       
       const progress = Math.min(100, Math.round((debtor.paid / debtor.totalDebt) * 100));
       const remaining = debtor.totalDebt - debtor.paid;

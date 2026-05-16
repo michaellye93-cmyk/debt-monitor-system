@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS public.user_access (
 -- 2. Modify Core Tables for Data Isolation
 ALTER TABLE public.staff ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
 ALTER TABLE public.debtors ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
+ALTER TABLE public.debtors ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'General';
 ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
 ALTER TABLE public.metrics ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
 ALTER TABLE public.activity_logs ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
