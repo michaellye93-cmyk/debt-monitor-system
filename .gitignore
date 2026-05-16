@@ -6,3 +6,12 @@ token.json
 __pycache__/
 *.pyc
 .DS_Store
+
+# Agent / AI Configuration
+AGENTS.md
+GEMINI.md
+SKILL.md
+skills/
+static_backup/
+instantiation_summary.md
+.pushgithub
