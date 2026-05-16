@@ -109,6 +109,64 @@ export default function App() {
     }
   };
 
+  // Derived Metrics (Calculated from Debtors & Schedules)
+  const { 
+    weeklyTarget, 
+    weeklyRecovered, 
+    monthlyTarget, 
+    monthlyRecovered,
+    totalSystemDebt,
+    totalSystemPaid,
+    systemProgress
+  } = useMemo(() => {
+    const now = new Date();
+    // Week start (Monday)
+    const startOfWeek = new Date(now);
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    startOfWeek.setDate(diff);
+    startOfWeek.setHours(0,0,0,0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23,59,59,999);
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    // Extract all schedules from all debtors
+    const allSchedules = debtors.flatMap(d => (d.schedules || []).map(s => ({
+      ...s,
+      amount: Number(s.amount),
+      dateObj: new Date(s.dateObj)
+    })));
+
+    const wT = allSchedules.filter(s => s.dateObj >= startOfWeek && s.dateObj <= endOfWeek)
+      .reduce((sum, s) => sum + s.amount, 0);
+
+    const wR = allSchedules.filter(s => s.dateObj >= startOfWeek && s.dateObj <= endOfWeek && s.status === 'paid')
+      .reduce((sum, s) => sum + s.amount, 0);
+
+    const mT = allSchedules.filter(s => s.dateObj >= startOfMonth && s.dateObj <= endOfMonth)
+      .reduce((sum, s) => sum + s.amount, 0);
+
+    const mR = allSchedules.filter(s => s.dateObj >= startOfMonth && s.dateObj <= endOfMonth && s.status === 'paid')
+      .reduce((sum, s) => sum + s.amount, 0);
+
+    const tDebt = debtors.reduce((sum, d) => sum + (Number(d.totalDebt) || 0), 0);
+    const tPaid = debtors.reduce((sum, d) => sum + (Number(d.paid) || 0), 0);
+    const sProg = tDebt > 0 ? (tPaid / tDebt) * 100 : 0;
+
+    return { 
+      weeklyTarget: wT, 
+      weeklyRecovered: wR, 
+      monthlyTarget: mT, 
+      monthlyRecovered: mR,
+      totalSystemDebt: tDebt,
+      totalSystemPaid: tPaid,
+      systemProgress: sProg
+    };
+  }, [debtors]);
+
   const handleDeleteStaff = async (staffId: string, staffName: string) => {
     if (!window.confirm(`Are you sure you want to remove ${staffName}?`)) return;
     try {
@@ -505,17 +563,17 @@ export default function App() {
                 <h3 className="font-headline-sm text-headline-sm text-primary">Weekly Target</h3>
                 <p className="font-body-md text-body-md text-on-surface-variant">Mon-Sun ({getWeekInterval()})</p>
               </div>
-              <button className="text-primary hover:bg-surface-container p-1 rounded transition-colors" onClick={() => { setEditWeeklyTarget(metrics.weeklyTarget.toString()); setEditMonthlyTarget(metrics.monthlyTarget.toString()); setActiveModal('editTargets'); }}>
+              <button className="text-primary hover:bg-surface-container p-1 rounded transition-colors" onClick={() => setActiveModal('editTargets')}>
                 <span className="material-symbols-outlined text-[18px]">edit</span>
               </button>
             </div>
             
             <div className="flex justify-between items-end mb-2">
-              <span className="font-headline-lg text-headline-lg text-primary"><span className="text-sm text-on-surface-variant mr-1">RM</span>{metrics.weeklyRecovered.toLocaleString()}</span>
-              <span className="font-body-md text-body-md text-on-surface-variant mb-1">/ RM{metrics.weeklyTarget.toLocaleString()}</span>
+              <span className="font-headline-lg text-headline-lg text-primary"><span className="text-sm text-on-surface-variant mr-1">RM</span>{weeklyRecovered.toLocaleString()}</span>
+              <span className="font-body-md text-body-md text-on-surface-variant mb-1">/ RM{weeklyTarget.toLocaleString()}</span>
             </div>
             <div className="w-full bg-surface-container-high rounded-full h-2">
-              <div className="bg-primary h-2 rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (metrics.weeklyRecovered / metrics.weeklyTarget) * 100)}%` }}></div>
+              <div className="bg-primary h-2 rounded-full transition-all duration-500" style={{ width: `${weeklyTarget > 0 ? Math.min(100, (weeklyRecovered / weeklyTarget) * 100) : 0}%` }}></div>
             </div>
           </div>
 
@@ -525,17 +583,17 @@ export default function App() {
                 <h3 className="font-headline-sm text-headline-sm text-primary">Monthly Target</h3>
                 <p className="font-body-md text-body-md text-on-surface-variant">{new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
               </div>
-              <button className="text-primary hover:bg-surface-container p-1 rounded transition-colors" onClick={() => { setEditWeeklyTarget(metrics.weeklyTarget.toString()); setEditMonthlyTarget(metrics.monthlyTarget.toString()); setActiveModal('editTargets'); }}>
+              <button className="text-primary hover:bg-surface-container p-1 rounded transition-colors" onClick={() => setActiveModal('editTargets')}>
                 <span className="material-symbols-outlined text-[18px]">edit</span>
               </button>
             </div>
             
             <div className="flex justify-between items-end mb-2">
-              <span className="font-headline-lg text-headline-lg text-primary"><span className="text-sm text-on-surface-variant mr-1">RM</span>{metrics.monthlyRecovered.toLocaleString()}</span>
-              <span className="font-body-md text-body-md text-on-surface-variant mb-1">/ RM{metrics.monthlyTarget.toLocaleString()}</span>
+              <span className="font-headline-lg text-headline-lg text-primary"><span className="text-sm text-on-surface-variant mr-1">RM</span>{monthlyRecovered.toLocaleString()}</span>
+              <span className="font-body-md text-body-md text-on-surface-variant mb-1">/ RM{monthlyTarget.toLocaleString()}</span>
             </div>
             <div className="w-full bg-surface-container-high rounded-full h-2">
-              <div className="bg-secondary h-2 rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (metrics.monthlyRecovered / metrics.monthlyTarget) * 100)}%` }}></div>
+              <div className="bg-secondary h-2 rounded-full transition-all duration-500" style={{ width: `${monthlyTarget > 0 ? Math.min(100, (monthlyRecovered / monthlyTarget) * 100) : 0}%` }}></div>
             </div>
           </div>
         </section>
@@ -970,6 +1028,28 @@ export default function App() {
             <Plus size={16} /> Add Debtor
           </button>
         </header>
+
+        <div className="card" style={{ marginBottom: '24px', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: 'white', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}>
+           <div className="card-body" style={{ padding: '24px' }}>
+             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'flex-end' }}>
+               <div>
+                 <span style={{ fontSize: '0.875rem', opacity: 0.8, display: 'block', marginBottom: '4px' }}>Portfolio Health</span>
+                 <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>{Math.round(systemProgress)}% Collected</span>
+               </div>
+               <div style={{ textAlign: 'right' }}>
+                 <span style={{ fontSize: '0.875rem', opacity: 0.8, display: 'block', marginBottom: '4px' }}>Remaining Recovery</span>
+                 <span style={{ fontSize: '1.25rem', fontWeight: 600 }}>RM {(totalSystemDebt - totalSystemPaid).toLocaleString()}</span>
+               </div>
+             </div>
+             <div className="progress-bg" style={{ height: '12px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '6px' }}>
+               <div className="progress-fill" style={{ width: `${systemProgress}%`, backgroundColor: '#3b82f6', boxShadow: '0 0 15px rgba(59,130,246,0.5)', borderRadius: '6px' }}></div>
+             </div>
+             <div style={{ marginTop: '16px', fontSize: '0.875rem', opacity: 0.7, display: 'flex', gap: '24px' }}>
+               <span>Total Debt: RM {totalSystemDebt.toLocaleString()}</span>
+               <span>Total Collected: RM {totalSystemPaid.toLocaleString()}</span>
+             </div>
+           </div>
+        </div>
 
         <div className="card">
           <div className="list-group">
