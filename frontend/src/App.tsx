@@ -158,6 +158,7 @@ export default function App() {
       if (error) throw error;
       setNewStaffName('');
       addActivity(`Added new staff member: ${newStaffName}`);
+      fetchData();
     } catch (err: any) {
       console.error('Error adding staff:', err);
       window.alert(`Failed to add staff: ${err.message || 'Unknown error'}`);
@@ -228,6 +229,7 @@ export default function App() {
       const { error } = await supabase.from('staff').delete().eq('id', staffId);
       if (error) throw error;
       addActivity(`Removed staff member: ${staffName}`);
+      fetchData();
     } catch (err: any) {
       console.error('Error deleting staff:', err);
       window.alert(`Failed to delete staff: ${err.message || 'Unknown error'}`);
@@ -262,82 +264,6 @@ export default function App() {
         setQueue({ dueToday: [], overdue: [], scheduled: [] });
       }
     });
-
-    const fetchData = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes, profileRes] = await Promise.all([
-          supabase.from('staff').select('*'),
-          supabase.from('debtors').select('*'),
-          supabase.from('schedules').select('*').neq('status', 'paid'),
-          supabase.from('metrics').select('*').limit(1).maybeSingle(),
-          supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(20),
-          supabase.from('user_access').select('is_admin').eq('auth_user_id', user.id).maybeSingle()
-        ]);
-
-        if (profileRes.data) setIsAdmin(profileRes.data.is_admin);
-        if (staffRes.data) setStaffList(staffRes.data);
-        if (debtorsRes.data) {
-           const formattedDebtors = debtorsRes.data.map(d => ({
-               ...d,
-               totalDebt: Number(d.total_debt),
-               paid: Number(d.paid),
-               assignedStaffId: d.assigned_staff_id,
-               emergencyContact: d.emergency_contact,
-               delayHistory: d.delay_history || [],
-               schedules: schedulesRes.data?.filter(s => s.debtor_id === d.id).map(s => ({
-                   id: s.id, name: d.name, amount: Number(s.amount), case: d.creditor, dateObj: new Date(s.due_date), status: s.status
-               })) || []
-           }));
-           setDebtors(formattedDebtors);
-        }
-        
-        // Handle Metrics Isolation & Auto-Initialization
-        if (metricsRes.data) {
-          setMetrics({
-             weeklyTarget: Number(metricsRes.data.weekly_target),
-             weeklyRecovered: Number(metricsRes.data.weekly_recovered),
-             monthlyTarget: Number(metricsRes.data.monthly_target),
-             monthlyRecovered: Number(metricsRes.data.monthly_recovered)
-          });
-        } else {
-          // New User: Initialize their singleton metrics row
-          const { data: newMetrics } = await supabase.from('metrics').insert([{
-            id: 'singleton',
-            owner_id: user.id,
-            weekly_target: 5000,
-            monthly_target: 20000,
-            weekly_recovered: 0,
-            monthly_recovered: 0
-          }]).select().single();
-          
-          if (newMetrics) {
-            setMetrics({
-              weeklyTarget: Number(newMetrics.weekly_target),
-              weeklyRecovered: 0,
-              monthlyTarget: Number(newMetrics.monthly_target),
-              monthlyRecovered: 0
-            });
-          }
-        }
-        
-        if (logsRes.data) {
-          setActivities(logsRes.data.map(log => ({ 
-              id: log.id, 
-              text: log.text, 
-              time: new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-          })));
-        }
-
-        if (schedulesRes.data && debtorsRes.data) {
-           rebuildQueue(schedulesRes.data, debtorsRes.data);
-        }
-      } catch (err) {
-        console.error('Error fetching initial data:', err);
-      }
-    };
 
     fetchData();
 
@@ -404,6 +330,80 @@ export default function App() {
          }
       });
       setQueue(newQueue);
+  };
+
+  const fetchData = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes, profileRes] = await Promise.all([
+        supabase.from('staff').select('*'),
+        supabase.from('debtors').select('*'),
+        supabase.from('schedules').select('*').neq('status', 'paid'),
+        supabase.from('metrics').select('*').limit(1).maybeSingle(),
+        supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(20),
+        supabase.from('user_access').select('is_admin').eq('auth_user_id', user.id).maybeSingle()
+      ]);
+
+      if (profileRes.data) setIsAdmin(profileRes.data.is_admin);
+      if (staffRes.data) setStaffList(staffRes.data);
+      if (debtorsRes.data) {
+         const formattedDebtors = debtorsRes.data.map(d => ({
+             ...d,
+             totalDebt: Number(d.total_debt),
+             paid: Number(d.paid),
+             assignedStaffId: d.assigned_staff_id,
+             emergencyContact: d.emergency_contact,
+             delayHistory: d.delay_history || [],
+             schedules: schedulesRes.data?.filter(s => s.debtor_id === d.id).map(s => ({
+                 id: s.id, name: d.name, amount: Number(s.amount), case: d.creditor, dateObj: new Date(s.due_date), status: s.status
+             })) || []
+         }));
+         setDebtors(formattedDebtors);
+      }
+      
+      if (metricsRes.data) {
+        setMetrics({
+           weeklyTarget: Number(metricsRes.data.weekly_target),
+           weeklyRecovered: Number(metricsRes.data.weekly_recovered),
+           monthlyTarget: Number(metricsRes.data.monthly_target),
+           monthlyRecovered: Number(metricsRes.data.monthly_recovered)
+        });
+      } else {
+        const { data: newMetrics } = await supabase.from('metrics').insert([{
+          id: 'singleton',
+          owner_id: user.id,
+          weekly_target: 5000,
+          monthly_target: 20000,
+          weekly_recovered: 0,
+          monthly_recovered: 0
+        }]).select().single();
+        
+        if (newMetrics) {
+          setMetrics({
+            weeklyTarget: Number(newMetrics.weekly_target),
+            weeklyRecovered: 0,
+            monthlyTarget: Number(newMetrics.monthly_target),
+            monthlyRecovered: 0
+          });
+        }
+      }
+      
+      if (logsRes.data) {
+        setActivities(logsRes.data.map(log => ({ 
+            id: log.id, 
+            text: log.text, 
+            time: new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+        })));
+      }
+
+      if (schedulesRes.data && debtorsRes.data) {
+         rebuildQueue(schedulesRes.data, debtorsRes.data);
+      }
+    } catch (err) {
+      console.error('Error fetching data:', err);
+    }
   };
 
   const addActivity = async (text: string) => {
@@ -478,6 +478,7 @@ export default function App() {
 
     addActivity(`Payment of RM${amount.toLocaleString()} recorded for ${debtor.name}.`);
     setActiveModal(null);
+    fetchData();
   };
 
   const handleConfirmPostpone = async () => {
@@ -501,6 +502,7 @@ export default function App() {
 
     addActivity(`Follow-up for ${debtor.name} rescheduled to ${postponeDate}.`);
     setActiveModal(null);
+    fetchData();
   };
 
   const handleAddDebtor = async () => {
@@ -521,12 +523,14 @@ export default function App() {
     addActivity(`New debtor profile created for ${newDebtor.name}.`);
     setNewDebtor({ name: '', creditor: '', totalDebt: '', phone: '', address: '', emergencyContact: '', status: 'active' });
     setActiveModal(null);
+    fetchData();
   };
 
   const handleDeleteDebtor = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this debtor profile?")) {
       await supabase.from('debtors').delete().eq('id', id);
       setSelectedProfileId(null);
+      fetchData();
     }
   };
 
@@ -564,6 +568,7 @@ export default function App() {
     addActivity(`Payment schedule generated for ${debtor.name} (${inserts.length} installments).`);
     setInstallmentAmt('');
     setStartDate('');
+    fetchData();
   };
 
   const getStaffNameForDebtor = (debtorId: string) => {
