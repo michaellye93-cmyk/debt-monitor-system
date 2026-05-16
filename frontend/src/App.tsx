@@ -98,50 +98,59 @@ export default function App() {
 
   // Supabase Data Fetching & Subscriptions
   useEffect(() => {
+    if (!supabase) {
+      console.error('Supabase client not initialized. Check environment variables.');
+      return;
+    }
+
     const fetchData = async () => {
-      const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes] = await Promise.all([
-        supabase.from('staff').select('*'),
-        supabase.from('debtors').select('*'),
-        supabase.from('schedules').select('*').neq('status', 'paid'),
-        supabase.from('metrics').select('*').eq('id', 'singleton').single(),
-        supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(20)
-      ]);
+      try {
+        const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes] = await Promise.all([
+          supabase.from('staff').select('*'),
+          supabase.from('debtors').select('*'),
+          supabase.from('schedules').select('*').neq('status', 'paid'),
+          supabase.from('metrics').select('*').eq('id', 'singleton').single(),
+          supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(20)
+        ]);
 
-      if (staffRes.data) setStaffList(staffRes.data);
-      if (debtorsRes.data) {
-         const formattedDebtors = debtorsRes.data.map(d => ({
-             ...d,
-             totalDebt: Number(d.total_debt),
-             paid: Number(d.paid),
-             assignedStaffId: d.assigned_staff_id,
-             emergencyContact: d.emergency_contact,
-             delayHistory: d.delay_history || [],
-             schedules: schedulesRes.data?.filter(s => s.debtor_id === d.id).map(s => ({
-                 id: s.id, name: d.name, amount: Number(s.amount), case: d.creditor, dateObj: new Date(s.due_date), status: s.status
-             })) || []
-         }));
-         setDebtors(formattedDebtors);
-      }
-      
-      if (metricsRes.data) {
-        setMetrics({
-           weeklyTarget: Number(metricsRes.data.weekly_target),
-           weeklyRecovered: Number(metricsRes.data.weekly_recovered),
-           monthlyTarget: Number(metricsRes.data.monthly_target),
-           monthlyRecovered: Number(metricsRes.data.monthly_recovered)
-        });
-      }
-      
-      if (logsRes.data) {
-        setActivities(logsRes.data.map(log => ({ 
-            id: log.id, 
-            text: log.text, 
-            time: new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-        })));
-      }
+        if (staffRes.data) setStaffList(staffRes.data);
+        if (debtorsRes.data) {
+           const formattedDebtors = debtorsRes.data.map(d => ({
+               ...d,
+               totalDebt: Number(d.total_debt),
+               paid: Number(d.paid),
+               assignedStaffId: d.assigned_staff_id,
+               emergencyContact: d.emergency_contact,
+               delayHistory: d.delay_history || [],
+               schedules: schedulesRes.data?.filter(s => s.debtor_id === d.id).map(s => ({
+                   id: s.id, name: d.name, amount: Number(s.amount), case: d.creditor, dateObj: new Date(s.due_date), status: s.status
+               })) || []
+           }));
+           setDebtors(formattedDebtors);
+        }
+        
+        if (metricsRes.data) {
+          setMetrics({
+             weeklyTarget: Number(metricsRes.data.weekly_target),
+             weeklyRecovered: Number(metricsRes.data.weekly_recovered),
+             monthlyTarget: Number(metricsRes.data.monthly_target),
+             monthlyRecovered: Number(metricsRes.data.monthly_recovered)
+          });
+        }
+        
+        if (logsRes.data) {
+          setActivities(logsRes.data.map(log => ({ 
+              id: log.id, 
+              text: log.text, 
+              time: new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+          })));
+        }
 
-      if (schedulesRes.data && debtorsRes.data) {
-         rebuildQueue(schedulesRes.data, debtorsRes.data);
+        if (schedulesRes.data && debtorsRes.data) {
+           rebuildQueue(schedulesRes.data, debtorsRes.data);
+        }
+      } catch (err) {
+        console.error('Error fetching initial data:', err);
       }
     };
 
@@ -421,6 +430,7 @@ export default function App() {
     const filteredDueToday = getFilteredQueue(queue.dueToday);
     // Priority 3: Upcoming Scheduled
     const filteredScheduled = getFilteredQueue(queue.scheduled);
+
 
     return (
       <div className="max-w-container-max mx-auto space-y-8">
@@ -1039,6 +1049,45 @@ export default function App() {
       </div>
     </div>
   );
+
+  if (!supabase) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background p-4 text-center">
+        <div className="max-w-md w-full bg-surface-container border border-error/20 p-8 rounded-xl shadow-lg">
+          <div className="w-16 h-16 bg-error/10 text-error rounded-full flex items-center justify-center mx-auto mb-6">
+            <span className="material-symbols-outlined text-4xl text-error">warning</span>
+          </div>
+          <h1 className="text-xl font-bold text-on-surface mb-2">Supabase Connection Error</h1>
+          <p className="text-on-surface-variant mb-6 text-sm leading-relaxed">
+            We couldn't connect to the backend. Please ensure <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> are correctly configured in your environment.
+          </p>
+          <div className="bg-surface-container-lowest p-4 rounded-lg border border-outline-variant text-left mb-6">
+            <p className="text-[10px] font-mono text-primary uppercase mb-2 tracking-widest">Deployment Checklist:</p>
+            <ul className="text-xs space-y-2 text-on-surface">
+              <li className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm text-success">check_circle</span>
+                <span>Vercel project linked to GitHub</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm text-warning">info</span>
+                <span>Environment variables set with VITE_ prefix</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm text-error">error</span>
+                <span>Supabase project is active</span>
+              </li>
+            </ul>
+          </div>
+          <button 
+            className="w-full py-3 px-4 bg-primary text-on-primary rounded-xl font-semibold shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
+            onClick={() => window.location.reload()}
+          >
+            Retry Connection
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-background text-on-background font-body-md text-body-md h-screen flex overflow-hidden">
