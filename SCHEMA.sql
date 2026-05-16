@@ -1,78 +1,53 @@
--- LATEST SQL SCHEMA FOR DEBT MONITOR SYSTEM
+-- LATEST SQL SCHEMA FOR MULTI-USER DEBT MONITOR SYSTEM
 -- Run this in your Supabase SQL Editor
 
--- 1. Create Tables
-
--- Staff Table
-CREATE TABLE IF NOT EXISTS public.staff (
+-- 1. Create User Access Lookup Table
+CREATE TABLE IF NOT EXISTS public.user_access (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    role TEXT DEFAULT 'Collector',
+    access_id TEXT UNIQUE NOT NULL,
+    pin TEXT NOT NULL,
+    auth_user_id UUID UNIQUE NOT NULL, -- Links to auth.users
+    email TEXT NOT NULL,
+    password TEXT NOT NULL, -- Masked/Managed via proxy
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Debtors Table
-CREATE TABLE IF NOT EXISTS public.debtors (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    creditor TEXT DEFAULT 'N/A',
-    total_debt NUMERIC DEFAULT 0,
-    paid NUMERIC DEFAULT 0,
-    status TEXT DEFAULT 'active', -- 'active' or 'missing'
-    assigned_staff_id UUID REFERENCES public.staff(id) ON DELETE SET NULL,
-    delay_history TEXT[] DEFAULT '{}',
-    address TEXT,
-    emergency_contact TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- 2. Modify Core Tables for Data Isolation
+ALTER TABLE public.staff ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
+ALTER TABLE public.debtors ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
+ALTER TABLE public.metrics ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
+ALTER TABLE public.activity_logs ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
 
--- Schedules Table
-CREATE TABLE IF NOT EXISTS public.schedules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    debtor_id UUID REFERENCES public.debtors(id) ON DELETE CASCADE,
-    amount NUMERIC NOT NULL,
-    due_date DATE NOT NULL,
-    status TEXT DEFAULT 'pending', -- 'pending' or 'paid'
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Metrics Table (Singleton for targets)
-CREATE TABLE IF NOT EXISTS public.metrics (
-    id TEXT PRIMARY KEY,
-    weekly_target NUMERIC DEFAULT 10000,
-    monthly_target NUMERIC DEFAULT 40000,
-    weekly_recovered NUMERIC DEFAULT 0,
-    monthly_recovered NUMERIC DEFAULT 0
-);
-
--- Activity Logs Table
-CREATE TABLE IF NOT EXISTS public.activity_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    text TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 2. Enable Realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE public.staff;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.debtors;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.schedules;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.metrics;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_logs;
-
--- 3. Seed Singleton Metrics
-INSERT INTO public.metrics (id, weekly_target, monthly_target, weekly_recovered, monthly_recovered)
-VALUES ('singleton', 10000, 40000, 0, 0)
-ON CONFLICT (id) DO NOTHING;
-
--- 4. RLS (Row Level Security) - Basic open policy for now as requested
+-- 3. Enable RLS and Implement Security Policies
 ALTER TABLE public.staff ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.debtors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.schedules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_access ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow all access" ON public.staff FOR ALL USING (true);
-CREATE POLICY "Allow all access" ON public.debtors FOR ALL USING (true);
-CREATE POLICY "Allow all access" ON public.schedules FOR ALL USING (true);
-CREATE POLICY "Allow all access" ON public.metrics FOR ALL USING (true);
-CREATE POLICY "Allow all access" ON public.activity_logs FOR ALL USING (true);
+-- Drop old "Allow all" policies if they exist
+DROP POLICY IF EXISTS "Allow all access" ON public.staff;
+DROP POLICY IF EXISTS "Allow all access" ON public.debtors;
+DROP POLICY IF EXISTS "Allow all access" ON public.schedules;
+DROP POLICY IF EXISTS "Allow all access" ON public.metrics;
+DROP POLICY IF EXISTS "Allow all access" ON public.activity_logs;
+
+-- Implement Isolated Access Policies
+CREATE POLICY "Isolated Access" ON public.staff FOR ALL USING (auth.uid() = owner_id);
+CREATE POLICY "Isolated Access" ON public.debtors FOR ALL USING (auth.uid() = owner_id);
+CREATE POLICY "Isolated Access" ON public.schedules FOR ALL USING (auth.uid() = owner_id);
+CREATE POLICY "Isolated Access" ON public.metrics FOR ALL USING (auth.uid() = owner_id);
+CREATE POLICY "Isolated Access" ON public.activity_logs FOR ALL USING (auth.uid() = owner_id);
+
+-- Special Policy for user_access (Public read for login proxy, admin write)
+CREATE POLICY "Public Login Lookup" ON public.user_access FOR SELECT USING (true);
+CREATE POLICY "Admin Manage Access" ON public.user_access FOR ALL USING (auth.uid() = '00000000-0000-0000-0000-000000000000'); -- Placeholder for Master Admin UID
+
+-- 4. Enable Realtime
+ALTER PUBLICATION supabase_realtime ADD TABLE public.staff;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.debtors;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.schedules;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.metrics;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_logs;

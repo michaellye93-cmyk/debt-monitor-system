@@ -58,6 +58,20 @@ export default function App() {
   const [metrics, setMetrics] = useState({ weeklyTarget: 5000, weeklyRecovered: 0, monthlyTarget: 20000, monthlyRecovered: 0 });
   const [debtors, setDebtors] = useState<Debtor[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Login Form State
+  const [loginId, setLoginId] = useState('');
+  const [loginPin, setLoginPin] = useState('');
+  const [authError, setAuthError] = useState('');
+
+  // Onboarding (Admin) State
+  const [newAccessId, setNewAccessId] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [targetUid, setTargetUid] = useState('');
+  const [targetEmail, setTargetEmail] = useState('');
+  const [targetPassword, setTargetPassword] = useState('');
 
   // Profile View State
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -96,10 +110,50 @@ export default function App() {
   // Dashboard Filters
   const [activeStaffFilter, setActiveStaffFilter] = useState<string>('all');
 
+  const handleLogin = async () => {
+    setAuthError('');
+    try {
+      const { data, error } = await supabase
+        .from('user_access')
+        .select('email, password')
+        .eq('access_id', loginId)
+        .eq('pin', loginPin)
+        .single();
+
+      if (error || !data) throw new Error('Invalid Access ID or PIN');
+
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: data.email,
+        password: data.password
+      });
+
+      if (signInError) throw signInError;
+    } catch (err: any) {
+      setAuthError(err.message);
+    }
+  };
+
+  const handleCreateUserAccess = async () => {
+    try {
+      const { error } = await supabase.from('user_access').insert([{
+        access_id: newAccessId,
+        pin: newPin,
+        auth_user_id: targetUid,
+        email: targetEmail,
+        password: targetPassword
+      }]);
+      if (error) throw error;
+      window.alert('User Access created successfully!');
+      setNewAccessId(''); setNewPin(''); setTargetUid(''); setTargetEmail(''); setTargetPassword('');
+    } catch (err: any) {
+      window.alert(`Failed to create access: ${err.message}`);
+    }
+  };
+
   const handleAddStaff = async () => {
     if (!newStaffName.trim()) return;
     try {
-      const { error } = await supabase.from('staff').insert([{ name: newStaffName, role: 'Collector' }]);
+      const { error } = await supabase.from('staff').insert([{ name: newStaffName, role: 'Collector', owner_id: session?.user?.id }]);
       if (error) throw error;
       setNewStaffName('');
       addActivity(`Added new staff member: ${newStaffName}`);
@@ -191,10 +245,11 @@ export default function App() {
 
   // Supabase Data Fetching & Subscriptions
   useEffect(() => {
-    if (!isConfigured) {
-      console.error('Supabase client not initialized. Check environment variables.');
-      return;
-    }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+      if (session) fetchData();
+    });
 
     const fetchData = async () => {
       try {
@@ -314,7 +369,7 @@ export default function App() {
   };
 
   const addActivity = async (text: string) => {
-      await supabase.from('activity_logs').insert([{ text }]);
+      await supabase.from('activity_logs').insert([{ text, owner_id: session?.user?.id }]);
   };
 
   const allActionableDebtors = useMemo(() => {
@@ -421,7 +476,8 @@ export default function App() {
         phone: newDebtor.phone || 'N/A',
         address: newDebtor.address,
         emergency_contact: newDebtor.emergencyContact,
-        status: newDebtor.status
+        status: newDebtor.status,
+        owner_id: session?.user?.id
     }]);
 
     addActivity(`New debtor profile created for ${newDebtor.name}.`);
@@ -455,7 +511,8 @@ export default function App() {
           installment_number: installNum++,
           amount: amount,
           due_date: new Date(currentDate).toISOString().split('T')[0],
-          status: 'scheduled'
+          status: 'scheduled',
+          owner_id: session?.user?.id
       });
       balance -= amount;
 
@@ -1151,43 +1208,116 @@ export default function App() {
           </div>
         </div>
       </div>
+      <div className="card" style={{ marginTop: '24px', border: '1px solid #fee2e2', backgroundColor: '#fff5f5' }}>
+        <div className="card-header" style={{ borderBottomColor: '#fecaca' }}>
+          <h3 style={{ color: '#b91c1c' }}>System Administration</h3>
+        </div>
+        <div className="card-body">
+          <p style={{ fontSize: '0.8125rem', color: '#7f1d1d', marginBottom: '16px', lineHeight: '1.4' }}>
+            <strong>Create Public User Access:</strong> Link a Supabase UID to a custom Access ID and PIN. 
+            This allows external users to see only their specific data pool.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+            <input 
+              type="text" className="form-input" placeholder="Supabase UID" 
+              value={targetUid} onChange={e => setTargetUid(e.target.value)} 
+            />
+            <input 
+              type="email" className="form-input" placeholder="User Email" 
+              value={targetEmail} onChange={e => setTargetEmail(e.target.value)} 
+            />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+            <input 
+              type="password" className="form-input" placeholder="User Password" 
+              value={targetPassword} onChange={e => setTargetPassword(e.target.value)} 
+            />
+            <input 
+              type="text" className="form-input" placeholder="Set Access ID" 
+              value={newAccessId} onChange={e => setNewAccessId(e.target.value)} 
+            />
+            <input 
+              type="text" className="form-input" placeholder="Set PIN" 
+              value={newPin} onChange={e => setNewPin(e.target.value)} 
+            />
+          </div>
+          <button 
+            className="btn btn-primary" style={{ width: '100%', backgroundColor: '#ef4444' }}
+            onClick={handleCreateUserAccess}
+          >
+            Authorize User Access
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '32px', textAlign: 'center' }}>
+        <button 
+          className="btn btn-outline" 
+          style={{ borderColor: '#e2e8f0', color: '#64748b' }}
+          onClick={async () => { await supabase.auth.signOut(); window.location.reload(); }}
+        >
+          Logout Session
+        </button>
+      </div>
     </div>
   );
 
-  if (!isConfigured) {
+  if (loading) {
+    return <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center font-bold text-[#1e293b]">Initializing System...</div>;
+  }
+
+  if (!session) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-background p-4 text-center">
-        <div className="max-w-md w-full bg-surface-container border border-error/20 p-8 rounded-xl shadow-lg">
-          <div className="w-16 h-16 bg-error/10 text-error rounded-full flex items-center justify-center mx-auto mb-6">
-            <span className="material-symbols-outlined text-4xl text-error">warning</span>
+      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
+        <div className="bg-white rounded-[32px] border border-[#e2e8f0] p-10 w-full max-w-[440px] shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
+          <div className="text-center mb-10">
+            <div className="w-16 h-16 bg-[#3b82f6]/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <span className="material-symbols-outlined text-3xl text-[#3b82f6]">shield_person</span>
+            </div>
+            <h1 className="text-[28px] font-bold text-[#0f172a] tracking-tight mb-2">Debt Monitor System</h1>
+            <p className="text-[#64748b] text-sm font-medium">Enter your credentials to access your dashboard</p>
           </div>
-          <h1 className="text-xl font-bold text-on-surface mb-2">Supabase Connection Error</h1>
-          <p className="text-on-surface-variant mb-6 text-sm leading-relaxed">
-            We couldn't connect to the backend. Please ensure <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> are correctly configured in your environment.
+          
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-[#94a3b8] uppercase tracking-wider ml-1">Access ID</label>
+              <input 
+                type="text" 
+                className="w-full bg-[#f1f5f9] border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-[#3b82f6]/20 outline-none transition-all text-[#1e293b] font-medium"
+                value={loginId}
+                onChange={(e) => setLoginId(e.target.value)}
+                placeholder="e.g. COLLECTION_HQ"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-[#94a3b8] uppercase tracking-wider ml-1">Secret PIN</label>
+              <input 
+                type="password" 
+                className="w-full bg-[#f1f5f9] border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-[#3b82f6]/20 outline-none transition-all text-[#1e293b] font-medium"
+                value={loginPin}
+                onChange={(e) => setLoginPin(e.target.value)}
+                placeholder="••••"
+              />
+            </div>
+
+            {authError && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-xs font-semibold text-center animate-pulse">
+                {authError}
+              </div>
+            )}
+            
+            <button 
+              onClick={handleLogin}
+              className="w-full bg-[#0f172a] text-white py-4 rounded-2xl font-bold hover:bg-[#1e293b] transition-all shadow-[0_10px_20px_rgba(15,23,42,0.15)] active:scale-[0.98]"
+            >
+              Access Dashboard
+            </button>
+          </div>
+          
+          <p className="text-center mt-10 text-[11px] text-[#94a3b8] font-medium">
+            Authorized Personnel Only • Secure Data Isolation Active
           </p>
-          <div className="bg-surface-container-lowest p-4 rounded-lg border border-outline-variant text-left mb-6">
-            <p className="text-[10px] font-mono text-primary uppercase mb-2 tracking-widest">Deployment Checklist:</p>
-            <ul className="text-xs space-y-2 text-on-surface">
-              <li className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm text-success">check_circle</span>
-                <span>Vercel project linked to GitHub</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm text-warning">info</span>
-                <span>Environment variables set with VITE_ prefix</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm text-error">error</span>
-                <span>Supabase project is active</span>
-              </li>
-            </ul>
-          </div>
-          <button 
-            className="w-full py-3 px-4 bg-primary text-on-primary rounded-xl font-semibold shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
-            onClick={() => window.location.reload()}
-          >
-            Retry Connection
-          </button>
         </div>
       </div>
     );
