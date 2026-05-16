@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, ChevronRight, ArrowLeft, Trash2, UserCircle, Filter } from 'lucide-react';
+import { Plus, ChevronRight, ArrowLeft, Trash2, UserCircle, Filter, Download, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
 import './index.css';
 
@@ -26,6 +27,7 @@ interface Debtor {
   id: string;
   name: string;
   creditor: string;
+  category: string;
   totalDebt: number;
   paid: number;
   phone: string;
@@ -94,7 +96,7 @@ export default function App() {
   const [editTotalDebt, setEditTotalDebt] = useState<string>('');
 
   // Add Debtor Form State
-  const [newDebtor, setNewDebtor] = useState<{name: string, creditor: string, totalDebt: string, phone: string, address: string, emergencyContact: string, status: 'active' | 'missing'}>({ name: '', creditor: '', totalDebt: '', phone: '', address: '', emergencyContact: '', status: 'active' });
+  const [newDebtor, setNewDebtor] = useState<{name: string, creditor: string, category: string, totalDebt: string, phone: string, address: string, emergencyContact: string, status: 'active' | 'missing'}>({ name: '', creditor: '', category: '', totalDebt: '', phone: '', address: '', emergencyContact: '', status: 'active' });
 
   // Add Staff Form State
   const [newStaffName, setNewStaffName] = useState('');
@@ -110,6 +112,9 @@ export default function App() {
 
   // Dashboard Filters
   const [activeStaffFilter, setActiveStaffFilter] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterCreditor, setFilterCreditor] = useState('all');
+  const [filterCategory, setFilterCategory] = useState('all');
 
   const handleLogin = async () => {
     setAuthError('');
@@ -353,6 +358,7 @@ export default function App() {
              ...d,
              totalDebt: Number(d.total_debt),
              paid: Number(d.paid),
+             category: d.category || 'General',
              assignedStaffId: d.assigned_staff_id,
              emergencyContact: d.emergency_contact,
              delayHistory: d.delay_history || [],
@@ -408,6 +414,74 @@ export default function App() {
 
   const addActivity = async (text: string) => {
       await supabase.from('activity_logs').insert([{ text, owner_id: session?.user?.id }]);
+  };
+
+  const availableCategories = useMemo(() => {
+    const cats = debtors.map(d => d.category).filter(Boolean);
+    return Array.from(new Set(cats)).sort();
+  }, [debtors]);
+
+  const availableCreditors = useMemo(() => {
+    const creds = debtors.map(d => d.creditor).filter(Boolean);
+    return Array.from(new Set(creds)).sort();
+  }, [debtors]);
+
+  const handleExportExcel = () => {
+    const exportData = debtors.map(d => ({
+      Name: d.name,
+      Creditor: d.creditor,
+      Category: d.category,
+      'Total Debt': d.totalDebt,
+      Paid: d.paid,
+      Phone: d.phone,
+      Address: d.address,
+      'Emergency Contact': d.emergencyContact,
+      Status: d.status
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Debtors");
+    XLSX.writeFile(wb, "Debt_Portfolio_Export.xlsx");
+    addActivity("Exported debtor portfolio to Excel.");
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+        const batch = data.map(item => ({
+          name: item.Name || item.name,
+          creditor: item.Creditor || item.creditor || 'N/A',
+          category: item.Category || item.category || 'General',
+          total_debt: parseFloat(item['Total Debt'] || item.total_debt) || 0,
+          paid: parseFloat(item.Paid || item.paid) || 0,
+          phone: item.Phone || item.phone || 'N/A',
+          address: item.Address || item.address || '',
+          emergency_contact: item['Emergency Contact'] || item.emergency_contact || '',
+          status: (item.Status || item.status || 'active').toLowerCase(),
+          owner_id: session?.user?.id
+        }));
+
+        const { error } = await supabase.from('debtors').insert(batch);
+        if (error) throw error;
+
+        addActivity(`Imported ${batch.length} debtors from Excel.`);
+        fetchData();
+        window.alert(`Successfully imported ${batch.length} debtors.`);
+      } catch (err: any) {
+        console.error("Import failed:", err);
+        window.alert("Import failed. Please check the Excel format.");
+      }
+    };
+    reader.readAsBinaryString(file);
   };
 
   const allActionableDebtors = useMemo(() => {
@@ -511,6 +585,7 @@ export default function App() {
     await supabase.from('debtors').insert([{
         name: newDebtor.name,
         creditor: newDebtor.creditor || 'N/A',
+        category: newDebtor.category || 'General',
         total_debt: parseFloat(newDebtor.totalDebt) || 0,
         paid: 0,
         phone: newDebtor.phone || 'N/A',
@@ -521,7 +596,7 @@ export default function App() {
     }]);
 
     addActivity(`New debtor profile created for ${newDebtor.name}.`);
-    setNewDebtor({ name: '', creditor: '', totalDebt: '', phone: '', address: '', emergencyContact: '', status: 'active' });
+    setNewDebtor({ name: '', creditor: '', category: '', totalDebt: '', phone: '', address: '', emergencyContact: '', status: 'active' });
     setActiveModal(null);
     fetchData();
   };
@@ -1116,7 +1191,15 @@ export default function App() {
       );
     }
 
-    // Filter Profile Directory similarly? The user only asked for tasks (dashboard), but filtering directory is nice too. I'll just filter the directory as well to be comprehensive.
+    const filteredDebtors = useMemo(() => {
+      return debtors.filter(d => {
+        const matchStatus = filterStatus === 'all' || d.status === filterStatus;
+        const matchCreditor = filterCreditor === 'all' || d.creditor === filterCreditor;
+        const matchCategory = filterCategory === 'all' || d.category === filterCategory;
+        return matchStatus && matchCreditor && matchCategory;
+      });
+    }, [debtors, filterStatus, filterCreditor, filterCategory]);
+
     return (
       <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
         <header className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1124,10 +1207,48 @@ export default function App() {
             <h2>Debtor Directory</h2>
             <p className="subtitle">Manage profiles and track individual collection progress.</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setActiveModal('addDebtor')}>
-            <Plus size={16} /> Add Debtor
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <label className="btn btn-outline" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Upload size={16} /> Import Excel
+              <input type="file" accept=".xlsx, .xls, .csv" onChange={handleImportExcel} style={{ display: 'none' }} />
+            </label>
+            <button className="btn btn-outline" onClick={handleExportExcel} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Download size={16} /> Export Excel
+            </button>
+            <button className="btn btn-primary" onClick={() => setActiveModal('addDebtor')}>
+              <Plus size={16} /> Add Debtor
+            </button>
+          </div>
         </header>
+
+        {/* Filters */}
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <div className="card-body" style={{ display: 'flex', gap: '16px', padding: '16px' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Status</label>
+              <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="missing">Missing</option>
+                <option value="settled">Settled</option>
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Creditor</label>
+              <select className="form-select" value={filterCreditor} onChange={e => setFilterCreditor(e.target.value)}>
+                <option value="all">All Creditors</option>
+                {availableCreditors.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Category</label>
+              <select className="form-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+                <option value="all">All Categories</option>
+                {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
 
         <div className="card" style={{ marginBottom: '24px', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: 'white', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}>
            <div className="card-body" style={{ padding: '24px' }}>
@@ -1153,8 +1274,8 @@ export default function App() {
 
         <div className="card">
           <div className="list-group">
-            {debtors.length === 0 && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>No debtors found. Add one to get started.</div>}
-            {debtors.map(debtor => {
+            {filteredDebtors.length === 0 && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>No debtors match your filters.</div>}
+            {filteredDebtors.map(debtor => {
               const progress = Math.min(100, Math.round((debtor.paid / debtor.totalDebt) * 100));
               const isComplete = progress >= 100;
 
@@ -1171,11 +1292,13 @@ export default function App() {
                       {renderStaffBadge(debtor.id)}
                       {debtor.status === 'missing' ? (
                         <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#fee2e2', color: '#ef4444', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>Missing</span>
+                      ) : debtor.status === 'settled' ? (
+                        <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#dcfce7', color: '#16a34a', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>Settled</span>
                       ) : (
-                        <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#dcfce7', color: '#22c55e', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>Active</span>
+                        <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#d1fae5', color: '#065f46', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>Active</span>
                       )}
                     </div>
-                    <div className="debtor-meta">Creditor {debtor.creditor}</div>
+                    <div className="debtor-meta">{debtor.category} • {debtor.creditor}</div>
                   </div>
                   
                   <div style={{ paddingRight: '24px' }}>
@@ -1571,15 +1694,31 @@ export default function App() {
                   onChange={e => setNewDebtor(prev => ({ ...prev, name: e.target.value }))}
                 />
               </div>
-              <div className="form-group">
-                <label className="form-label">Creditor Name</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="e.g. ABC Bank"
-                  value={newDebtor.creditor}
-                  onChange={e => setNewDebtor(prev => ({ ...prev, creditor: e.target.value }))}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="form-group">
+                  <label className="form-label">Creditor Name</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="e.g. ABC Bank"
+                    value={newDebtor.creditor}
+                    onChange={e => setNewDebtor(prev => ({ ...prev, creditor: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Category</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="e.g. Personal"
+                    list="category-list"
+                    value={newDebtor.category}
+                    onChange={e => setNewDebtor(prev => ({ ...prev, category: e.target.value }))}
+                  />
+                  <datalist id="category-list">
+                    {availableCategories.map(cat => <option key={cat} value={cat} />)}
+                  </datalist>
+                </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className="form-group">
