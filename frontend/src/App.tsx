@@ -58,8 +58,9 @@ export default function App() {
   const [metrics, setMetrics] = useState({ weeklyTarget: 5000, weeklyRecovered: 0, monthlyTarget: 20000, monthlyRecovered: 0 });
   const [debtors, setDebtors] = useState<Debtor[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
-  const [session, setSession] = useState<any>(null);
+   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Login Form State
   const [loginId, setLoginId] = useState('');
@@ -267,14 +268,16 @@ export default function App() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes] = await Promise.all([
+        const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes, profileRes] = await Promise.all([
           supabase.from('staff').select('*'),
           supabase.from('debtors').select('*'),
           supabase.from('schedules').select('*').neq('status', 'paid'),
           supabase.from('metrics').select('*').limit(1).maybeSingle(),
-          supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(20)
+          supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(20),
+          supabase.from('user_access').select('is_admin').eq('auth_user_id', user.id).maybeSingle()
         ]);
 
+        if (profileRes.data) setIsAdmin(profileRes.data.is_admin);
         if (staffRes.data) setStaffList(staffRes.data);
         if (debtorsRes.data) {
            const formattedDebtors = debtorsRes.data.map(d => ({
@@ -1243,47 +1246,49 @@ export default function App() {
           </div>
         </div>
       </div>
-      <div className="card" style={{ marginTop: '24px', border: '1px solid #fee2e2', backgroundColor: '#fff5f5' }}>
-        <div className="card-header" style={{ borderBottomColor: '#fecaca' }}>
-          <h3 style={{ color: '#b91c1c' }}>System Administration</h3>
-        </div>
-        <div className="card-body">
-          <p style={{ fontSize: '0.8125rem', color: '#7f1d1d', marginBottom: '16px', lineHeight: '1.4' }}>
-            <strong>Create Public User Access:</strong> Link a Supabase UID to a custom Access ID and PIN. 
-            This allows external users to see only their specific data pool.
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-            <input 
-              type="text" className="form-input" placeholder="Supabase UID" 
-              value={targetUid} onChange={e => setTargetUid(e.target.value)} 
-            />
-            <input 
-              type="email" className="form-input" placeholder="User Email" 
-              value={targetEmail} onChange={e => setTargetEmail(e.target.value)} 
-            />
+      {isAdmin && (
+        <div className="card" style={{ marginTop: '24px', border: '1px solid #fee2e2', backgroundColor: '#fff5f5' }}>
+          <div className="card-header" style={{ borderBottomColor: '#fecaca' }}>
+            <h3 style={{ color: '#b91c1c' }}>System Administration</h3>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-            <input 
-              type="password" className="form-input" placeholder="User Password" 
-              value={targetPassword} onChange={e => setTargetPassword(e.target.value)} 
-            />
-            <input 
-              type="text" className="form-input" placeholder="Set Access ID" 
-              value={newAccessId} onChange={e => setNewAccessId(e.target.value)} 
-            />
-            <input 
-              type="text" className="form-input" placeholder="Set PIN" 
-              value={newPin} onChange={e => setNewPin(e.target.value)} 
-            />
+          <div className="card-body">
+            <p style={{ fontSize: '0.8125rem', color: '#7f1d1d', marginBottom: '16px', lineHeight: '1.4' }}>
+              <strong>Create Public User Access:</strong> Link a Supabase UID to a custom Access ID and PIN. 
+              This allows external users to see only their specific data pool.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <input 
+                type="text" className="form-input" placeholder="Supabase UID" 
+                value={targetUid} onChange={e => setTargetUid(e.target.value)} 
+              />
+              <input 
+                type="email" className="form-input" placeholder="User Email" 
+                value={targetEmail} onChange={e => setTargetEmail(e.target.value)} 
+              />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <input 
+                type="password" className="form-input" placeholder="User Password" 
+                value={targetPassword} onChange={e => setTargetPassword(e.target.value)} 
+              />
+              <input 
+                type="text" className="form-input" placeholder="Set Access ID" 
+                value={newAccessId} onChange={e => setNewAccessId(e.target.value)} 
+              />
+              <input 
+                type="text" className="form-input" placeholder="Set PIN" 
+                value={newPin} onChange={e => setNewPin(e.target.value)} 
+              />
+            </div>
+            <button 
+              className="btn btn-primary" style={{ width: '100%', backgroundColor: '#ef4444' }}
+              onClick={handleCreateUserAccess}
+            >
+              Authorize User Access
+            </button>
           </div>
-          <button 
-            className="btn btn-primary" style={{ width: '100%', backgroundColor: '#ef4444' }}
-            onClick={handleCreateUserAccess}
-          >
-            Authorize User Access
-          </button>
         </div>
-      </div>
+      )}
 
       <div style={{ marginTop: '32px', textAlign: 'center' }}>
         <button 
