@@ -251,6 +251,17 @@ export default function App() {
       if (session) fetchData();
     });
 
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        fetchData();
+      } else {
+        setDebtors([]);
+        setStaffList([]);
+        setQueue({ dueToday: [], overdue: [], scheduled: [] });
+      }
+    });
+
     const fetchData = async () => {
       try {
         const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes] = await Promise.all([
@@ -315,6 +326,7 @@ export default function App() {
     }).subscribe();
 
     return () => {
+      subscription.unsubscribe();
       supabase.removeChannel(staffSub);
       supabase.removeChannel(debtorsSub);
       supabase.removeChannel(schedulesSub);
@@ -1286,7 +1298,7 @@ export default function App() {
                 className="w-full bg-[#f1f5f9] border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-[#3b82f6]/20 outline-none transition-all text-[#1e293b] font-medium"
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
-                placeholder="e.g. COLLECTION_HQ"
+                placeholder=""
               />
             </div>
             
@@ -1297,7 +1309,7 @@ export default function App() {
                 className="w-full bg-[#f1f5f9] border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-[#3b82f6]/20 outline-none transition-all text-[#1e293b] font-medium"
                 value={loginPin}
                 onChange={(e) => setLoginPin(e.target.value)}
-                placeholder="••••"
+                placeholder=""
               />
             </div>
 
