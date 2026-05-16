@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS public.user_access (
     auth_user_id UUID UNIQUE NOT NULL, -- Links to auth.users
     email TEXT NOT NULL,
     password TEXT NOT NULL, -- Masked/Managed via proxy
+    is_admin BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -43,7 +44,12 @@ CREATE POLICY "Isolated Access" ON public.activity_logs FOR ALL USING (auth.uid(
 
 -- Special Policy for user_access (Public read for login proxy, admin write)
 CREATE POLICY "Public Login Lookup" ON public.user_access FOR SELECT USING (true);
-CREATE POLICY "Admin Manage Access" ON public.user_access FOR ALL USING (auth.uid() = '00000000-0000-0000-0000-000000000000'); -- Placeholder for Master Admin UID
+CREATE POLICY "Admins Manage Access" ON public.user_access FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM public.user_access 
+    WHERE auth_user_id = auth.uid() AND is_admin = true
+  )
+);
 
 -- 4. Enable Realtime
 ALTER PUBLICATION supabase_realtime ADD TABLE public.staff;
