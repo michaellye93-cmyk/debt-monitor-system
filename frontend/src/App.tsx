@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Plus, ChevronRight, ArrowLeft, Trash2, UserCircle, Filter } from 'lucide-react';
-import { supabase, isConfigured } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import './index.css';
 
 const getWeekInterval = () => {
