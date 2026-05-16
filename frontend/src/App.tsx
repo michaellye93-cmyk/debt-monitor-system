@@ -1,22 +1,16 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Plus, ChevronRight, ArrowLeft, Trash2, UserCircle, Filter } from 'lucide-react';
+import { supabase } from './supabaseClient';
 import './index.css';
 
-const getTodayISO = () => { const d = new Date(); return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0]; };
-const getYesterdayISO = () => { const d = new Date(); d.setDate(d.getDate() - 1); return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0]; };
-const getTomorrowISO = () => { const d = new Date(); d.setDate(d.getDate() + 1); return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0]; };
-
-const initialQueueData = {
-  dueToday: [
-    { id: '1_q', debtorId: '1', name: 'Ali', amount: 500, status: 'pending', time: '10:00 AM', case: 'ABC', dateISO: getTodayISO() },
-    { id: '2_q', debtorId: '2', name: 'Marcus Thorne', amount: 350, status: 'pending', time: '4:30 PM', case: 'XYZ', dateISO: getTodayISO() },
-  ],
-  overdue: [
-    { id: '3_q', debtorId: '3', name: 'Avery Sterling', amount: 4200, status: 'overdue', daysOverdue: 2, case: 'LMN', dateISO: getYesterdayISO() },
-  ],
-  scheduled: [
-    { id: '4_q', debtorId: '4', name: 'Elena Ross', amount: 150, status: 'scheduled', date: '17 MAY', case: 'XYZ', dateISO: getTomorrowISO() },
-  ]
+const getWeekInterval = () => {
+  const curr = new Date();
+  const day = curr.getDay();
+  const diffToMonday = curr.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(curr.setDate(diffToMonday));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return `${monday.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} - ${sunday.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
 };
 
 interface ScheduleItem {
@@ -25,6 +19,7 @@ interface ScheduleItem {
   amount: number;
   case: string;
   dateObj: Date;
+  status: string;
 }
 
 interface Debtor {
@@ -38,7 +33,7 @@ interface Debtor {
   assignedStaffId?: string;
   address?: string;
   emergencyContact?: string;
-  status?: 'active' | 'missing';
+  status?: 'active' | 'missing' | 'settled';
   delayHistory?: string[];
 }
 
@@ -54,42 +49,15 @@ interface Staff {
   role: string;
 }
 
-const initialStaffData: Staff[] = [
-  { id: 's1', name: 'Agent Smith', role: 'Collector' },
-  { id: 's2', name: 'Agent Johnson', role: 'Collector' }
-];
-
-const initialDebtorsData: Debtor[] = [
-  { id: '1', name: 'Ali', creditor: 'ABC', totalDebt: 3000, paid: 500, phone: '+60 12-345 6789', assignedStaffId: 's1', address: '123 Main St, KL', emergencyContact: '+60 11-123 4567', status: 'active' },
-  { id: '2', name: 'Marcus Thorne', creditor: 'XYZ', totalDebt: 1500, paid: 1150, phone: '+60 19-876 5432', assignedStaffId: 's2', address: '456 Elm St, Penang', emergencyContact: '+60 19-999 8888', status: 'missing' },
-  { id: '3', name: 'Avery Sterling', creditor: 'LMN', totalDebt: 8400, paid: 4200, phone: '+60 17-555 1234', assignedStaffId: 's1', address: '789 Oak Ave, JB', emergencyContact: '', status: 'active' },
-  { id: '4', name: 'Elena Ross', creditor: 'XYZ', totalDebt: 1000, paid: 850, phone: '+60 11-222 3333', assignedStaffId: 's2', address: '', emergencyContact: '', status: 'active' },
-];
-
-const getWeekInterval = () => {
-  const curr = new Date();
-  const day = curr.getDay();
-  const diffToMonday = curr.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(curr.setDate(diffToMonday));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return `${monday.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} - ${sunday.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
-};
-
 export default function App() {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [activeNav, setActiveNav] = useState('dashboard');
   
   // App State
-  const [queue, setQueue] = useState(initialQueueData);
-  const [metrics, setMetrics] = useState({ 
-    weeklyTarget: 5000, 
-    weeklyRecovered: 1200,
-    monthlyTarget: 20000,
-    monthlyRecovered: 4500
-  });
-  const [debtors, setDebtors] = useState<Debtor[]>(initialDebtorsData);
-  const [staffList, setStaffList] = useState<Staff[]>(initialStaffData);
+  const [queue, setQueue] = useState({ dueToday: [] as any[], overdue: [] as any[], scheduled: [] as any[] });
+  const [metrics, setMetrics] = useState({ weeklyTarget: 5000, weeklyRecovered: 0, monthlyTarget: 20000, monthlyRecovered: 0 });
+  const [debtors, setDebtors] = useState<Debtor[]>([]);
+  const [staffList, setStaffList] = useState<Staff[]>([]);
 
   // Profile View State
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -103,21 +71,10 @@ export default function App() {
   const [viewDelayHistoryDebtorId, setViewDelayHistoryDebtorId] = useState<string | null>(null);
   
   // Activity / Notification State
-  const [activities, setActivities] = useState<ActivityLog[]>([
-    { id: 'act_init', text: 'System initialized with live database tracking.', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
-  ]);
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [hasNewActivity, setHasNewActivity] = useState(false);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
 
-  const addActivity = (text: string) => {
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setActivities(prev => [
-      { id: `act_${Date.now()}_${Math.random()}`, text, time: timeStr },
-      ...prev
-    ].slice(0, 20));
-    setHasNewActivity(true);
-  };
-  
   // Profile Edit State
   const [editTotalDebt, setEditTotalDebt] = useState<string>('');
 
@@ -126,47 +83,6 @@ export default function App() {
 
   // Add Staff Form State
   const [newStaffName, setNewStaffName] = useState('');
-
-  // Queue sweep for leftover cards
-  useEffect(() => {
-    setQueue(prevQueue => {
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      
-      const newQueue = { overdue: [...prevQueue.overdue], dueToday: [...prevQueue.dueToday], scheduled: [...prevQueue.scheduled] };
-      let changed = false;
-
-      const processList = (list: any[]) => {
-        const remaining = [];
-        for (const item of list) {
-          if (item.dateISO) {
-            const itemDate = new Date(item.dateISO);
-            itemDate.setHours(0,0,0,0);
-            const timeDiff = itemDate.getTime() - today.getTime();
-            const daysDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
-            
-            if (daysDiff < 0 && item.status !== 'overdue') {
-              newQueue.overdue.push({ ...item, status: 'overdue', daysOverdue: Math.abs(daysDiff) });
-              changed = true;
-            } else if (daysDiff === 0 && item.status !== 'pending') {
-              newQueue.dueToday.push({ ...item, status: 'pending', time: 'Pending' });
-              changed = true;
-            } else {
-              remaining.push(item);
-            }
-          } else {
-            remaining.push(item);
-          }
-        }
-        return remaining;
-      };
-
-      newQueue.scheduled = processList(newQueue.scheduled);
-      newQueue.dueToday = processList(newQueue.dueToday);
-
-      return changed ? newQueue : prevQueue;
-    });
-  }, []);
 
   // Target Edit Form State
   const [editWeeklyTarget, setEditWeeklyTarget] = useState('');
@@ -180,7 +96,125 @@ export default function App() {
   // Dashboard Filters
   const [activeStaffFilter, setActiveStaffFilter] = useState<string>('all');
 
-  // Collect all actionable debtors for the dropdowns
+  // Supabase Data Fetching & Subscriptions
+  useEffect(() => {
+    const fetchData = async () => {
+      const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes] = await Promise.all([
+        supabase.from('staff').select('*'),
+        supabase.from('debtors').select('*'),
+        supabase.from('schedules').select('*').neq('status', 'paid'),
+        supabase.from('metrics').select('*').eq('id', 'singleton').single(),
+        supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(20)
+      ]);
+
+      if (staffRes.data) setStaffList(staffRes.data);
+      if (debtorsRes.data) {
+         const formattedDebtors = debtorsRes.data.map(d => ({
+             ...d,
+             totalDebt: Number(d.total_debt),
+             paid: Number(d.paid),
+             assignedStaffId: d.assigned_staff_id,
+             emergencyContact: d.emergency_contact,
+             delayHistory: d.delay_history || [],
+             schedules: schedulesRes.data?.filter(s => s.debtor_id === d.id).map(s => ({
+                 id: s.id, name: d.name, amount: Number(s.amount), case: d.creditor, dateObj: new Date(s.due_date), status: s.status
+             })) || []
+         }));
+         setDebtors(formattedDebtors);
+      }
+      
+      if (metricsRes.data) {
+        setMetrics({
+           weeklyTarget: Number(metricsRes.data.weekly_target),
+           weeklyRecovered: Number(metricsRes.data.weekly_recovered),
+           monthlyTarget: Number(metricsRes.data.monthly_target),
+           monthlyRecovered: Number(metricsRes.data.monthly_recovered)
+        });
+      }
+      
+      if (logsRes.data) {
+        setActivities(logsRes.data.map(log => ({ 
+            id: log.id, 
+            text: log.text, 
+            time: new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+        })));
+      }
+
+      if (schedulesRes.data && debtorsRes.data) {
+         rebuildQueue(schedulesRes.data, debtorsRes.data);
+      }
+    };
+
+    fetchData();
+
+    // Supabase Realtime Subscriptions
+    const staffSub = supabase.channel('staff_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'staff' }, fetchData).subscribe();
+    const debtorsSub = supabase.channel('debtors_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'debtors' }, fetchData).subscribe();
+    const schedulesSub = supabase.channel('schedules_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'schedules' }, fetchData).subscribe();
+    const metricsSub = supabase.channel('metrics_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'metrics' }, fetchData).subscribe();
+    const logsSub = supabase.channel('logs_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, () => {
+        fetchData();
+        setHasNewActivity(true);
+    }).subscribe();
+
+    return () => {
+      supabase.removeChannel(staffSub);
+      supabase.removeChannel(debtorsSub);
+      supabase.removeChannel(schedulesSub);
+      supabase.removeChannel(metricsSub);
+      supabase.removeChannel(logsSub);
+    };
+  }, []);
+
+  const rebuildQueue = (allSchedules: any[], allDebtors: any[]) => {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      
+      const newQueue = { dueToday: [] as any[], overdue: [] as any[], scheduled: [] as any[] };
+      
+      allSchedules.forEach(sch => {
+         const debtor = allDebtors.find(d => d.id === sch.debtor_id);
+         if (!debtor || debtor.status === 'settled') return;
+
+         const schDate = new Date(sch.due_date);
+         schDate.setHours(0,0,0,0);
+         const timeDiff = schDate.getTime() - today.getTime();
+         const daysDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
+         
+         const dateISO = new Date(schDate.getTime() - (schDate.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+         const formattedDate = `${schDate.getDate()} ${schDate.toLocaleString('default', { month: 'short' }).toUpperCase()}`;
+
+         const item = {
+             id: sch.id,
+             debtorId: debtor.id,
+             name: debtor.name,
+             amount: Number(sch.amount),
+             status: sch.status,
+             case: debtor.creditor,
+             dateISO: dateISO,
+             date: formattedDate,
+             time: 'Pending',
+             daysOverdue: Math.abs(daysDiff)
+         };
+
+         if (daysDiff < 0 || sch.status === 'overdue') {
+            item.status = 'overdue';
+            newQueue.overdue.push(item);
+         } else if (daysDiff === 0) {
+            item.status = 'pending';
+            newQueue.dueToday.push(item);
+         } else {
+            item.status = 'scheduled';
+            newQueue.scheduled.push(item);
+         }
+      });
+      setQueue(newQueue);
+  };
+
+  const addActivity = async (text: string) => {
+      await supabase.from('activity_logs').insert([{ text }]);
+  };
+
   const allActionableDebtors = useMemo(() => {
     return [
       ...queue.overdue.map(d => ({ ...d, list: 'overdue' })),
@@ -198,9 +232,7 @@ export default function App() {
       }
     } else {
       const activeDebtors = debtors.filter(d => (d.totalDebt - d.paid) > 0);
-      if (activeDebtors.length > 0) {
-        setSelectedDebtorId(activeDebtors[0].id);
-      }
+      if (activeDebtors.length > 0) setSelectedDebtorId(activeDebtors[0].id);
       setPaymentAmount('');
     }
     setActiveModal('payment');
@@ -209,15 +241,11 @@ export default function App() {
   const handleOpenPostpone = (queueItemId?: string) => {
     if (queueItemId) {
       const item = allActionableDebtors.find(d => d.id === queueItemId);
-      if (item) {
-        setSelectedDebtorId(item.debtorId);
-      }
+      if (item) setSelectedDebtorId(item.debtorId);
       setPostponeItemId(queueItemId);
     } else {
       const activeDebtors = debtors.filter(d => (d.totalDebt - d.paid) > 0);
-      if (activeDebtors.length > 0) {
-        setSelectedDebtorId(activeDebtors[0].id);
-      }
+      if (activeDebtors.length > 0) setSelectedDebtorId(activeDebtors[0].id);
       setPostponeItemId(null);
     }
     setPostponeDate('');
@@ -225,176 +253,88 @@ export default function App() {
     setActiveModal('postpone');
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
     const amount = parseFloat(paymentAmount) || 0;
     if (amount <= 0 || !selectedDebtorId) return;
     
-    // Update Profile Debt
-    setDebtors(prev => prev.map(d => {
-      if (d.id === selectedDebtorId) {
-        return { ...d, paid: d.paid + amount };
-      }
-      return d;
-    }));
-
-    // Dynamic queue knock-off
-    let remaining = amount;
-    setQueue(prevQueue => {
-      const newQueue = { ...prevQueue };
-      const categories = ['overdue', 'dueToday', 'scheduled'];
-      
-      for (const cat of categories) {
-        if (remaining <= 0) break;
-        const items = [...newQueue[cat as keyof typeof newQueue]];
-        const newItems = [];
-        
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          if (item.debtorId === selectedDebtorId) {
-            if (remaining >= item.amount) {
-              remaining -= item.amount;
-              // Remove item completely (don't push to newItems)
-            } else if (remaining > 0) {
-              newItems.push({ ...item, amount: item.amount - remaining });
-              remaining = 0;
-            } else {
-              newItems.push(item);
-            }
-          } else {
-            newItems.push(item);
-          }
-        }
-        newQueue[cat as keyof typeof newQueue] = newItems as any;
-      }
-      return newQueue;
-    });
-
-    // Update metrics
-    setMetrics(prev => ({ 
-      ...prev, 
-      weeklyRecovered: prev.weeklyRecovered + amount,
-      monthlyRecovered: prev.monthlyRecovered + amount
-    }));
-    const debtor = debtors.find(d => d.id === selectedDebtorId);
-    addActivity(`Payment of RM${amount.toLocaleString()} recorded for ${debtor?.name || 'Account'}.`);
-    setActiveModal(null);
-  };
-
-  const handleConfirmPostpone = () => {
-    if (!selectedDebtorId || !postponeDate) return;
-
     const debtor = debtors.find(d => d.id === selectedDebtorId);
     if (!debtor) return;
 
-    setQueue(prevQueue => {
-      const newQueue = { ...prevQueue };
-      const [year, month, day] = postponeDate.split('-');
-      const formattedDate = `${day} ${new Date(parseInt(year), parseInt(month) - 1).toLocaleString('default', { month: 'short' }).toUpperCase()}`;
-      
-      let itemsToMove: any[] = [];
+    await supabase.from('debtors').update({ paid: debtor.paid + amount }).eq('id', selectedDebtorId);
+    
+    await supabase.from('metrics').update({
+        weekly_recovered: metrics.weeklyRecovered + amount,
+        monthly_recovered: metrics.monthlyRecovered + amount
+    }).eq('id', 'singleton');
 
-      const extractItems = (list: any[]) => list.filter(item => {
-        if (postponeItemId) {
-          if (item.id === postponeItemId) {
-            itemsToMove.push(item);
-            return false;
-          }
+    let remaining = amount;
+    const debtorSchedules = debtor.schedules?.sort((a,b) => a.dateObj.getTime() - b.dateObj.getTime()) || [];
+    
+    for (const sch of debtorSchedules) {
+        if (remaining <= 0) break;
+        if (remaining >= sch.amount) {
+            remaining -= sch.amount;
+            await supabase.from('schedules').update({ status: 'paid' }).eq('id', sch.id);
         } else {
-          // If no specific item selected, move all actionable items for this debtor
-          if (item.debtorId === selectedDebtorId) {
-            itemsToMove.push(item);
-            return false;
-          }
+            await supabase.from('schedules').update({ amount: sch.amount - remaining }).eq('id', sch.id);
+            remaining = 0;
         }
-        return true;
-      });
+    }
 
-      newQueue.overdue = extractItems(newQueue.overdue);
-      newQueue.dueToday = extractItems(newQueue.dueToday);
-      newQueue.scheduled = extractItems(newQueue.scheduled);
+    addActivity(`Payment of RM${amount.toLocaleString()} recorded for ${debtor.name}.`);
+    setActiveModal(null);
+  };
 
-      if (itemsToMove.length > 0) {
-        const totalAmountMoved = itemsToMove.reduce((sum, item) => sum + item.amount, 0);
-        
-        const targetDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-        targetDate.setHours(0,0,0,0);
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        
-        const timeDiff = targetDate.getTime() - today.getTime();
-        const daysDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
-        const dateISO = new Date(targetDate.getTime() - (targetDate.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-
-        const newItem = {
-          id: `sch_postponed_${Date.now()}`,
-          debtorId: debtor.id,
-          name: debtor.name,
-          amount: totalAmountMoved,
-          status: 'scheduled',
-          date: formattedDate,
-          case: debtor.creditor,
-          dateISO
-        };
-
-        if (daysDiff < 0) {
-          newQueue.overdue.push({ ...newItem, status: 'overdue', daysOverdue: Math.abs(daysDiff) });
-        } else if (daysDiff === 0) {
-          newQueue.dueToday.push({ ...newItem, status: 'pending', time: 'Pending' });
-        } else {
-          newQueue.scheduled.push(newItem);
-        }
-      }
-
-      return newQueue;
-    });
+  const handleConfirmPostpone = async () => {
+    if (!selectedDebtorId || !postponeDate) return;
+    const debtor = debtors.find(d => d.id === selectedDebtorId);
+    if (!debtor) return;
 
     const reasonText = postponeReason.trim() || `Postponed to ${postponeDate}`;
-    setDebtors(prev => prev.map(d => {
-      if (d.id === selectedDebtorId) {
-        return {
-          ...d,
-          delayHistory: [...(d.delayHistory || []), reasonText]
-        };
-      }
-      return d;
-    }));
+    await supabase.from('debtors').update({
+        delay_history: [...(debtor.delayHistory || []), reasonText]
+    }).eq('id', selectedDebtorId);
+
+    if (postponeItemId) {
+        await supabase.from('schedules').update({ due_date: postponeDate }).eq('id', postponeItemId);
+    } else {
+        const actionable = allActionableDebtors.filter(d => d.debtorId === selectedDebtorId);
+        for (const item of actionable) {
+            await supabase.from('schedules').update({ due_date: postponeDate }).eq('id', item.id);
+        }
+    }
 
     addActivity(`Follow-up for ${debtor.name} rescheduled to ${postponeDate}.`);
     setActiveModal(null);
   };
 
-  const handleAddDebtor = () => {
+  const handleAddDebtor = async () => {
     if (!newDebtor.name || !newDebtor.totalDebt) return;
     
-    const newId = Date.now().toString();
-    setDebtors(prev => [
-      ...prev,
-      {
-        id: newId,
+    await supabase.from('debtors').insert([{
         name: newDebtor.name,
         creditor: newDebtor.creditor || 'N/A',
-        totalDebt: parseFloat(newDebtor.totalDebt) || 0,
+        total_debt: parseFloat(newDebtor.totalDebt) || 0,
         paid: 0,
         phone: newDebtor.phone || 'N/A',
         address: newDebtor.address,
-        emergencyContact: newDebtor.emergencyContact,
+        emergency_contact: newDebtor.emergencyContact,
         status: newDebtor.status
-      }
-    ]);
+    }]);
 
     addActivity(`New debtor profile created for ${newDebtor.name}.`);
     setNewDebtor({ name: '', creditor: '', totalDebt: '', phone: '', address: '', emergencyContact: '', status: 'active' });
     setActiveModal(null);
   };
 
-  const handleDeleteDebtor = (id: string) => {
+  const handleDeleteDebtor = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this debtor profile?")) {
-      setDebtors(prev => prev.filter(d => d.id !== id));
+      await supabase.from('debtors').delete().eq('id', id);
       setSelectedProfileId(null);
     }
   };
 
-  const handleGenerateSchedule = () => {
+  const handleGenerateSchedule = async () => {
     const debtor = debtors.find(d => d.id === selectedProfileId);
     if (!debtor || !installmentAmt || !startDate) return;
 
@@ -403,72 +343,28 @@ export default function App() {
     if (balance <= 0) return;
 
     let currentDate = new Date(startDate);
-    const newSchedules: ScheduleItem[] = [];
+    let installNum = 1;
+    const inserts = [];
 
     while (balance > 0) {
       const amount = Math.min(balance, instAmt);
-      newSchedules.push({
-        id: `sch_${Date.now()}_${Math.random()}`,
-        name: debtor.name,
-        amount: amount,
-        case: debtor.creditor,
-        dateObj: new Date(currentDate)
+      inserts.push({
+          debtor_id: debtor.id,
+          installment_number: installNum++,
+          amount: amount,
+          due_date: new Date(currentDate).toISOString().split('T')[0],
+          status: 'scheduled'
       });
       balance -= amount;
 
-      if (scheduleFreq === 'Daily') {
-        currentDate.setDate(currentDate.getDate() + 1);
-      } else if (scheduleFreq === 'Weekly') {
-        currentDate.setDate(currentDate.getDate() + 7);
-      } else if (scheduleFreq === 'Bi-Weekly') {
-        currentDate.setDate(currentDate.getDate() + 14);
-      } else if (scheduleFreq === 'Monthly') {
-        currentDate.setMonth(currentDate.getMonth() + 1);
-      }
+      if (scheduleFreq === 'Daily') currentDate.setDate(currentDate.getDate() + 1);
+      else if (scheduleFreq === 'Weekly') currentDate.setDate(currentDate.getDate() + 7);
+      else if (scheduleFreq === 'Bi-Weekly') currentDate.setDate(currentDate.getDate() + 14);
+      else if (scheduleFreq === 'Monthly') currentDate.setMonth(currentDate.getMonth() + 1);
     }
 
-    // Save schedule to debtor profile
-    setDebtors(prev => prev.map(d => {
-      if (d.id === debtor.id) {
-        return { ...d, schedules: newSchedules };
-      }
-      return d;
-    }));
-
-    // Push all these to the queue
-    const today = new Date();
-    today.setHours(0,0,0,0);
-
-    const newOverdue: any[] = [];
-    const newDueToday: any[] = [];
-    const newScheduled: any[] = [];
-
-    newSchedules.forEach(sch => {
-      const schDate = new Date(sch.dateObj);
-      schDate.setHours(0,0,0,0);
-      const timeDiff = schDate.getTime() - today.getTime();
-      const daysDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
-      
-      const formattedDate = `${schDate.getDate()} ${schDate.toLocaleString('default', { month: 'short' }).toUpperCase()}`;
-
-      const dateISO = new Date(schDate.getTime() - (schDate.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-
-      if (daysDiff < 0) {
-        newOverdue.push({ id: sch.id, debtorId: debtor.id, name: sch.name, amount: sch.amount, status: 'overdue', daysOverdue: Math.abs(daysDiff), case: sch.case, dateISO });
-      } else if (daysDiff === 0) {
-        newDueToday.push({ id: sch.id, debtorId: debtor.id, name: sch.name, amount: sch.amount, status: 'pending', time: 'Pending', case: sch.case, dateISO });
-      } else {
-        newScheduled.push({ id: sch.id, debtorId: debtor.id, name: sch.name, amount: sch.amount, status: 'scheduled', date: formattedDate, case: sch.case, dateISO });
-      }
-    });
-
-    setQueue(prev => ({
-      overdue: [...prev.overdue.filter(item => item.debtorId !== debtor.id), ...newOverdue],
-      dueToday: [...prev.dueToday.filter(item => item.debtorId !== debtor.id), ...newDueToday],
-      scheduled: [...prev.scheduled.filter(item => item.debtorId !== debtor.id), ...newScheduled]
-    }));
-
-    addActivity(`Payment schedule generated for ${debtor.name} (${newSchedules.length} installments).`);
+    await supabase.from('schedules').insert(inserts);
+    addActivity(`Payment schedule generated for ${debtor.name} (${inserts.length} installments).`);
     setInstallmentAmt('');
     setStartDate('');
   };
