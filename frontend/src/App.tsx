@@ -264,11 +264,14 @@ export default function App() {
 
     const fetchData = async () => {
       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
         const [staffRes, debtorsRes, schedulesRes, metricsRes, logsRes] = await Promise.all([
           supabase.from('staff').select('*'),
           supabase.from('debtors').select('*'),
           supabase.from('schedules').select('*').neq('status', 'paid'),
-          supabase.from('metrics').select('*').eq('id', 'singleton').single(),
+          supabase.from('metrics').select('*').limit(1).maybeSingle(),
           supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(20)
         ]);
 
@@ -288,6 +291,7 @@ export default function App() {
            setDebtors(formattedDebtors);
         }
         
+        // Handle Metrics Isolation & Auto-Initialization
         if (metricsRes.data) {
           setMetrics({
              weeklyTarget: Number(metricsRes.data.weekly_target),
@@ -295,6 +299,25 @@ export default function App() {
              monthlyTarget: Number(metricsRes.data.monthly_target),
              monthlyRecovered: Number(metricsRes.data.monthly_recovered)
           });
+        } else {
+          // New User: Initialize their singleton metrics row
+          const { data: newMetrics } = await supabase.from('metrics').insert([{
+            id: 'singleton',
+            owner_id: user.id,
+            weekly_target: 5000,
+            monthly_target: 20000,
+            weekly_recovered: 0,
+            monthly_recovered: 0
+          }]).select().single();
+          
+          if (newMetrics) {
+            setMetrics({
+              weeklyTarget: Number(newMetrics.weekly_target),
+              weeklyRecovered: 0,
+              monthlyTarget: Number(newMetrics.monthly_target),
+              monthlyRecovered: 0
+            });
+          }
         }
         
         if (logsRes.data) {
