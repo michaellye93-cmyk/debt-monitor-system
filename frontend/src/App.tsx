@@ -435,6 +435,15 @@ export default function App() {
     return Array.from(new Set(creds)).sort();
   }, [debtors]);
 
+  const filteredDebtors = useMemo(() => {
+    return debtors.filter(d => {
+      const matchStatus = filterStatus === 'all' || d.status === filterStatus;
+      const matchCreditor = filterCreditor === 'all' || d.creditor === filterCreditor;
+      const matchCategory = filterCategory === 'all' || d.category === filterCategory;
+      return matchStatus && matchCreditor && matchCategory;
+    });
+  }, [debtors, filterStatus, filterCreditor, filterCategory]);
+
   const handleExportExcel = () => {
     const exportData = debtors.map(d => ({
       Name: d.name,
@@ -1204,15 +1213,6 @@ export default function App() {
         </div>
       );
     }
-
-    const filteredDebtors = useMemo(() => {
-      return debtors.filter(d => {
-        const matchStatus = filterStatus === 'all' || d.status === filterStatus;
-        const matchCreditor = filterCreditor === 'all' || d.creditor === filterCreditor;
-        const matchCategory = filterCategory === 'all' || d.category === filterCategory;
-        return matchStatus && matchCreditor && matchCategory;
-      });
-    }, [debtors, filterStatus, filterCreditor, filterCategory]);
 
     return (
       <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
