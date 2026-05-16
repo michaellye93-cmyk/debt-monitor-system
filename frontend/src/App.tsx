@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Plus, ChevronRight, ArrowLeft, Trash2, UserCircle, Filter } from 'lucide-react';
-import { supabase } from './supabaseClient';
+import { supabase, isConfigured } from './supabaseClient';
 import './index.css';
 
 const getWeekInterval = () => {
@@ -98,7 +98,7 @@ export default function App() {
 
   // Supabase Data Fetching & Subscriptions
   useEffect(() => {
-    if (!supabase) {
+    if (!isConfigured) {
       console.error('Supabase client not initialized. Check environment variables.');
       return;
     }
@@ -1050,7 +1050,7 @@ export default function App() {
     </div>
   );
 
-  if (!supabase) {
+  if (!isConfigured) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background p-4 text-center">
         <div className="max-w-md w-full bg-surface-container border border-error/20 p-8 rounded-xl shadow-lg">
