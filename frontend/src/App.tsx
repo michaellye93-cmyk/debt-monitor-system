@@ -96,6 +96,41 @@ export default function App() {
   // Dashboard Filters
   const [activeStaffFilter, setActiveStaffFilter] = useState<string>('all');
 
+  const handleAddStaff = async () => {
+    if (!newStaffName.trim()) return;
+    try {
+      const { error } = await supabase.from('staff').insert([{ name: newStaffName, role: 'Collector' }]);
+      if (error) throw error;
+      setNewStaffName('');
+      addActivity(`Added new staff member: ${newStaffName}`);
+    } catch (err: any) {
+      console.error('Error adding staff:', err);
+      window.alert(`Failed to add staff: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleDeleteStaff = async (staffId: string, staffName: string) => {
+    if (!window.confirm(`Are you sure you want to remove ${staffName}?`)) return;
+    try {
+      const { error } = await supabase.from('staff').delete().eq('id', staffId);
+      if (error) throw error;
+      addActivity(`Removed staff member: ${staffName}`);
+    } catch (err: any) {
+      console.error('Error deleting staff:', err);
+      window.alert(`Failed to delete staff: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  const updateDebtorField = async (id: string, updates: any) => {
+    try {
+      const { error } = await supabase.from('debtors').update(updates).eq('id', id);
+      if (error) throw error;
+    } catch (err: any) {
+      console.error('Error updating debtor:', err);
+      window.alert(`Failed to update debtor: ${err.message || 'Unknown error'}`);
+    }
+  };
+
   // Supabase Data Fetching & Subscriptions
   useEffect(() => {
     if (!isConfigured) {
@@ -718,9 +753,9 @@ export default function App() {
                       cursor: 'pointer'
                     }}
                     value={debtor.status || 'active'}
-                    onChange={e => {
+                    onChange={async (e) => {
                       const newStatus = e.target.value as 'active' | 'missing';
-                      setDebtors(prev => prev.map(d => d.id === debtor.id ? { ...d, status: newStatus } : d));
+                      await updateDebtorField(debtor.id, { status: newStatus });
                     }}
                   >
                     <option value="active">Active</option>
@@ -736,7 +771,7 @@ export default function App() {
                       className="form-input" 
                       style={{ padding: '6px 10px', fontSize: '0.875rem' }} 
                       value={debtor.address || ''} 
-                      onChange={e => setDebtors(prev => prev.map(d => d.id === debtor.id ? { ...d, address: e.target.value } : d))}
+                      onChange={e => updateDebtorField(debtor.id, { address: e.target.value })}
                       placeholder="Enter address"
                     />
                   </div>
@@ -747,7 +782,7 @@ export default function App() {
                       className="form-input" 
                       style={{ padding: '6px 10px', fontSize: '0.875rem' }} 
                       value={debtor.emergencyContact || ''} 
-                      onChange={e => setDebtors(prev => prev.map(d => d.id === debtor.id ? { ...d, emergencyContact: e.target.value } : d))}
+                      onChange={e => updateDebtorField(debtor.id, { emergency_contact: e.target.value })}
                       placeholder="Emergency contact"
                     />
                   </div>
@@ -772,9 +807,9 @@ export default function App() {
                   <select 
                     className="form-select"
                     value={debtor.assignedStaffId || ''}
-                    onChange={e => {
-                      const newStaffId = e.target.value;
-                      setDebtors(prev => prev.map(d => d.id === debtor.id ? { ...d, assignedStaffId: newStaffId } : d));
+                    onChange={async (e) => {
+                      const newStaffId = e.target.value || null;
+                      await updateDebtorField(debtor.id, { assigned_staff_id: newStaffId });
                     }}
                   >
                     <option value="">-- Unassigned --</option>
@@ -846,10 +881,10 @@ export default function App() {
                   <button 
                     className="btn btn-outline" 
                     style={{ width: '100%' }}
-                    onClick={() => {
+                    onClick={async () => {
                       const newTotal = parseFloat(editTotalDebt);
                       if (newTotal > 0) {
-                        setDebtors(prev => prev.map(d => d.id === debtor.id ? { ...d, totalDebt: newTotal } : d));
+                        await updateDebtorField(debtor.id, { total_debt: newTotal });
                         setEditTotalDebt('');
                       }
                     }}
@@ -1008,12 +1043,7 @@ export default function App() {
             />
             <button 
               className="btn btn-primary"
-              onClick={() => {
-                if (newStaffName.trim()) {
-                  setStaffList(prev => [...prev, { id: `staff_${Date.now()}`, name: newStaffName, role: 'Collector' }]);
-                  setNewStaffName('');
-                }
-              }}
+              onClick={handleAddStaff}
             >
               Add Staff
             </button>
@@ -1031,13 +1061,7 @@ export default function App() {
                 <button 
                   className="btn btn-outline btn-sm" 
                   style={{ color: 'var(--danger)', borderColor: 'var(--border-color)' }}
-                  onClick={() => {
-                    if(window.confirm(`Are you sure you want to remove ${staff.name}?`)) {
-                      setStaffList(prev => prev.filter(s => s.id !== staff.id));
-                      // Unassign staff from debtors
-                      setDebtors(prev => prev.map(d => d.assignedStaffId === staff.id ? { ...d, assignedStaffId: undefined } : d));
-                    }
-                  }}
+                  onClick={() => handleDeleteStaff(staff.id, staff.name)}
                 >
                   Remove
                 </button>
@@ -1402,12 +1426,13 @@ export default function App() {
                 <button className="btn btn-outline" onClick={() => setActiveModal(null)}>Cancel</button>
                 <button 
                   className="btn btn-primary" 
-                  onClick={() => {
-                    setMetrics(prev => ({
-                      ...prev,
-                      weeklyTarget: parseFloat(editWeeklyTarget) || 0,
-                      monthlyTarget: parseFloat(editMonthlyTarget) || 0
-                    }));
+                  onClick={async () => {
+                    const weekly = parseFloat(editWeeklyTarget) || 0;
+                    const monthly = parseFloat(editMonthlyTarget) || 0;
+                    await supabase.from('metrics').update({
+                      weekly_target: weekly,
+                      monthly_target: monthly
+                    }).eq('id', 'singleton');
                     setActiveModal(null);
                   }}
                 >
