@@ -112,6 +112,7 @@ export default function App() {
 
   // Dashboard Filters
   const [activeStaffFilter, setActiveStaffFilter] = useState<string>('all');
+  const [filterName, setFilterName] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCreditor, setFilterCreditor] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -440,9 +441,10 @@ export default function App() {
       const matchStatus = filterStatus === 'all' || d.status === filterStatus;
       const matchCreditor = filterCreditor === 'all' || d.creditor === filterCreditor;
       const matchCategory = filterCategory === 'all' || d.category === filterCategory;
-      return matchStatus && matchCreditor && matchCategory;
+      const matchName = !filterName || d.name.toLowerCase().includes(filterName.toLowerCase());
+      return matchStatus && matchCreditor && matchCategory && matchName;
     });
-  }, [debtors, filterStatus, filterCreditor, filterCategory]);
+  }, [debtors, filterStatus, filterCreditor, filterCategory, filterName]);
 
   const handleExportExcel = () => {
     const exportData = debtors.map(d => ({
@@ -540,37 +542,61 @@ export default function App() {
     setActiveModal('postpone');
   };
 
-  const handleConfirmPayment = async () => {
-    const amount = parseFloat(paymentAmount) || 0;
-    if (amount <= 0 || !selectedDebtorId) return;
+  const handleConfirmPayment = async (overrideDebtorId?: string, overrideAmount?: number) => {
+    const targetDebtorId = overrideDebtorId || selectedDebtorId;
+    const amount = overrideAmount !== undefined ? overrideAmount : (parseFloat(paymentAmount) || 0);
+
+    if (amount <= 0 || !targetDebtorId) return;
     
-    const debtor = debtors.find(d => d.id === selectedDebtorId);
+    const debtor = debtors.find(d => d.id === targetDebtorId);
     if (!debtor) return;
 
-    await supabase.from('debtors').update({ paid: debtor.paid + amount }).eq('id', selectedDebtorId);
-    
-    await supabase.from('metrics').update({
-        weekly_recovered: metrics.weeklyRecovered + amount,
-        monthly_recovered: metrics.monthlyRecovered + amount
-    }).eq('id', 'singleton');
+    // Optimistic UI update
+    setDebtors(prevDebtors => prevDebtors.map(d => 
+      d.id === targetDebtorId 
+        ? { ...d, paid: d.paid + amount } 
+        : d
+    ));
+    setMetrics(prevMetrics => ({
+      ...prevMetrics,
+      weeklyRecovered: prevMetrics.weeklyRecovered + amount,
+      monthlyRecovered: prevMetrics.monthlyRecovered + amount
+    }));
 
-    let remaining = amount;
-    const debtorSchedules = debtor.schedules?.sort((a,b) => a.dateObj.getTime() - b.dateObj.getTime()) || [];
-    
-    for (const sch of debtorSchedules) {
-        if (remaining <= 0) break;
-        if (remaining >= sch.amount) {
-            remaining -= sch.amount;
-            await supabase.from('schedules').update({ status: 'paid' }).eq('id', sch.id);
-        } else {
-            await supabase.from('schedules').update({ amount: sch.amount - remaining }).eq('id', sch.id);
-            remaining = 0;
-        }
+    if (!overrideDebtorId) {
+      setActiveModal(null);
     }
+    setPaymentAmount('');
 
-    addActivity(`Payment of RM${amount.toLocaleString()} recorded for ${debtor.name}.`);
-    setActiveModal(null);
-    fetchData();
+    try {
+      await supabase.from('debtors').update({ paid: debtor.paid + amount }).eq('id', targetDebtorId);
+      
+      await supabase.from('metrics').update({
+          weekly_recovered: metrics.weeklyRecovered + amount,
+          monthly_recovered: metrics.monthlyRecovered + amount
+      }).eq('id', 'singleton');
+
+      let remaining = amount;
+      const debtorSchedules = debtor.schedules?.sort((a,b) => a.dateObj.getTime() - b.dateObj.getTime()) || [];
+      
+      for (const sch of debtorSchedules) {
+          if (remaining <= 0) break;
+          if (remaining >= sch.amount) {
+              remaining -= sch.amount;
+              await supabase.from('schedules').update({ status: 'paid' }).eq('id', sch.id);
+          } else {
+              await supabase.from('schedules').update({ amount: sch.amount - remaining }).eq('id', sch.id);
+              remaining = 0;
+          }
+      }
+
+      addActivity(`Payment of RM${amount.toLocaleString()} recorded for ${debtor.name}.`);
+    } catch (err: any) {
+      console.error("Payment error:", err);
+      window.alert("Error recording payment");
+    } finally {
+      fetchData();
+    }
   };
 
   const handleConfirmPostpone = async () => {
@@ -1112,9 +1138,7 @@ export default function App() {
                     onClick={() => {
                       const amount = parseFloat(paymentAmount);
                       if (amount > 0) {
-                        setSelectedDebtorId(debtor.id);
-                        handleConfirmPayment();
-                        setPaymentAmount('');
+                        handleConfirmPayment(debtor.id, amount);
                       }
                     }}
                   >
@@ -1237,29 +1261,41 @@ export default function App() {
 
         {/* Filters */}
         <div className="card" style={{ marginBottom: '16px' }}>
-          <div className="card-body" style={{ display: 'flex', gap: '16px', padding: '16px' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Status</label>
-              <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-                <option value="all">All Status</option>
-                <option value="active">Active</option>
-                <option value="missing">Missing</option>
-                <option value="settled">Settled</option>
-              </select>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px' }}>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Search by Name</label>
+              <input 
+                type="text" 
+                className="form-input" 
+                placeholder="Search debtors..." 
+                value={filterName} 
+                onChange={e => setFilterName(e.target.value)} 
+              />
             </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Creditor</label>
-              <select className="form-select" value={filterCreditor} onChange={e => setFilterCreditor(e.target.value)}>
-                <option value="all">All Creditors</option>
-                {availableCreditors.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Category</label>
-              <select className="form-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-                <option value="all">All Categories</option>
-                {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+            <div style={{ display: 'flex', gap: '16px' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Status</label>
+                <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                  <option value="all">All Status</option>
+                  <option value="active">Active</option>
+                  <option value="missing">Missing</option>
+                  <option value="settled">Settled</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Creditor</label>
+                <select className="form-select" value={filterCreditor} onChange={e => setFilterCreditor(e.target.value)}>
+                  <option value="all">All Creditors</option>
+                  {availableCreditors.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Category</label>
+                <select className="form-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+                  <option value="all">All Categories</option>
+                  {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
             </div>
           </div>
         </div>
@@ -1282,6 +1318,7 @@ export default function App() {
              <div style={{ marginTop: '16px', fontSize: '0.875rem', opacity: 0.7, display: 'flex', gap: '24px' }}>
                <span>Total Debt: RM {totalSystemDebt.toLocaleString()}</span>
                <span>Total Collected: RM {totalSystemPaid.toLocaleString()}</span>
+               <span>Total Debtors Listed: {debtors.length}</span>
              </div>
            </div>
         </div>
@@ -1626,7 +1663,7 @@ export default function App() {
               </div>
               <div className="form-actions">
                 <button className="btn btn-outline" onClick={() => setActiveModal(null)}>Cancel</button>
-                <button className="btn btn-primary" onClick={handleConfirmPayment}>Confirm Payment</button>
+                <button className="btn btn-primary" onClick={() => handleConfirmPayment()}>Confirm Payment</button>
               </div>
             </div>
           </div>
