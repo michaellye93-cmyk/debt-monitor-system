@@ -1261,8 +1261,8 @@ export default function App() {
 
         {/* Filters */}
         <div className="card" style={{ marginBottom: '16px' }}>
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px' }}>
-            <div>
+          <div className="card-body" style={{ display: 'flex', gap: '16px', padding: '16px', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1.5, minWidth: '200px' }}>
               <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Search by Name</label>
               <input 
                 type="text" 
@@ -1272,30 +1272,28 @@ export default function App() {
                 onChange={e => setFilterName(e.target.value)} 
               />
             </div>
-            <div style={{ display: 'flex', gap: '16px' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Status</label>
-                <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-                  <option value="all">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="missing">Missing</option>
-                  <option value="settled">Settled</option>
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Creditor</label>
-                <select className="form-select" value={filterCreditor} onChange={e => setFilterCreditor(e.target.value)}>
-                  <option value="all">All Creditors</option>
-                  {availableCreditors.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Category</label>
-                <select className="form-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-                  <option value="all">All Categories</option>
-                  {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+            <div style={{ flex: 1, minWidth: '120px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Status</label>
+              <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="missing">Missing</option>
+                <option value="settled">Settled</option>
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: '120px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Creditor</label>
+              <select className="form-select" value={filterCreditor} onChange={e => setFilterCreditor(e.target.value)}>
+                <option value="all">All Creditors</option>
+                {availableCreditors.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: '120px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '4px', display: 'block' }}>Category</label>
+              <select className="form-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+                <option value="all">All Categories</option>
+                {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
           </div>
         </div>
